@@ -182,7 +182,6 @@ canvas{
 </main>
 
 <script>
-/* ================= CONFIG ================= */
 const CAL_TIME = 5000;
 const SQUINT_TIME = 5000;
 const EAR_WINDOW = 5;
@@ -194,7 +193,6 @@ const MIN_OPEN_INTERVAL = 120;
 const LEFT=[33,160,158,133,153,144];
 const RIGHT=[362,385,387,263,373,380];
 
-/* ================= STATE ================= */
 let earBuf=[], velBuf=[], cal=[];
 let calibrated=false;
 let eyeClosed=false, blinkStart=null;
@@ -207,7 +205,6 @@ let squintEARs=[], squintFloor=null;
 
 const session={id:new Date().toISOString(),bpmSamples:[]};
 
-/* ================= DOM ================= */
 const video=document.getElementById("video");
 const statusText=document.getElementById("statusText");
 const earText=document.getElementById("earText");
@@ -236,7 +233,6 @@ function saveSession(){
   localStorage.setItem("sessions",JSON.stringify(s));
 }
 
-/* ================= SQUINT BUTTON ================= */
 squintBtn.onmousedown=()=>{
   squintCalibrating=true;
   squintStart=Date.now();
@@ -256,7 +252,6 @@ document.onmouseup=()=>{
   } else statusText.textContent="Squint calibration canceled";
 };
 
-/* ================= MEDIAPIPE ================= */
 const fm=new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`});
 fm.setOptions({maxNumFaces:1,refineLandmarks:true});
 
@@ -309,10 +304,8 @@ fm.onResults(r=>{
   }
 });
 
-/* ================= CAMERA ================= */
 new Camera(video,{onFrame:async()=>fm.send({image:video}),width:640,height:480}).start();
 
-/* ================= NAV ================= */
 const tabLive=document.getElementById("tabLive");
 const tabGraphs=document.getElementById("tabGraphs");
 const live=document.getElementById("live");
@@ -332,7 +325,6 @@ function drawGraphs(){
   const width = c.width - margin.left - margin.right;
   const height = c.height - margin.top - margin.bottom;
 
-  /* ===== AXES ===== */
   g.strokeStyle = "#666";
   g.beginPath();
   g.moveTo(margin.left, margin.top);
@@ -340,11 +332,9 @@ function drawGraphs(){
   g.lineTo(margin.left + width, margin.top + height);
   g.stroke();
 
-  /* ===== AXIS LABELS ===== */
   g.fillStyle = "#9aa3c7";
   g.font = "14px system-ui";
 
-  // Y-axis label
   g.save();
   g.translate(15, margin.top + height / 2);
   g.rotate(-Math.PI / 2);
@@ -352,7 +342,6 @@ function drawGraphs(){
   g.fillText("Blink Rate (Blinks per Minute)", 0, 0);
   g.restore();
 
-  // X-axis label
   g.textAlign = "center";
   g.fillText(
     "Time (Minutes)",
@@ -360,7 +349,6 @@ function drawGraphs(){
     c.height - 15
   );
 
-  /* ===== DATA ===== */
   let xOffset = 0;
   const xStep = 20;
   const yScale = 5;
