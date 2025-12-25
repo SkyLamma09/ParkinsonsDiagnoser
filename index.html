@@ -120,6 +120,40 @@ canvas{
   border-radius:16px;
   border:1px solid #242a52;
 }
+
+/* === DISCLAIMER MODAL === */
+#disclaimerOverlay{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.65);
+  display:none;
+  align-items:center;
+  justify-content:center;
+  z-index:9999;
+}
+
+#disclaimerBox{
+  background:var(--panel);
+  border:1px solid #242a52;
+  border-radius:16px;
+  padding:24px;
+  max-width:520px;
+  box-shadow:0 30px 80px rgba(0,0,0,.6);
+}
+
+#disclaimerBox h3{
+  margin-top:0;
+  color:var(--warn);
+}
+
+#disclaimerBox p{
+  line-height:1.5;
+}
+
+#disclaimerBox button{
+  margin-top:16px;
+  width:100%;
+}
 </style>
 </head>
 
@@ -181,6 +215,17 @@ canvas{
 
 </main>
 
+<!-- DISCLAIMER MODAL -->
+<div id="disclaimerOverlay">
+  <div id="disclaimerBox">
+    <h3>⚠️ Persistent Blink Reduction Detected</h3>
+    <p>Your blink rate has been reduced by <strong>30% or more</strong> across multiple days.</p>
+    <p>This may be associated with eye strain, dehydration, fatigue, or neurological/ophthalmic factors.</p>
+    <p>This software is <strong>not a medical device</strong> and does not provide diagnosis. Consider breaks, ergonomic changes, or consulting a healthcare professional.</p>
+    <button id="disclaimerOk">I Understand</button>
+  </div>
+</div>
+
 <script>
 const CAL_TIME = 5000;
 const SQUINT_TIME = 5000;
@@ -230,6 +275,42 @@ function saveSession(){
   const i=s.findIndex(x=>x.id===session.id);
   if(i===-1)s.push(session);else s[i]=session;
   localStorage.setItem("sessions",JSON.stringify(s));
+}
+
+/* === DISCLAIMER LOGIC (NO BLINK LOGIC CHANGES) === */
+const DISCLAIMER_THRESHOLD = 0.7;
+const DISCLAIMER_REQUIRED_DAYS = 3;
+
+const overlay=document.getElementById("disclaimerOverlay");
+document.getElementById("disclaimerOk").onclick=()=>overlay.style.display="none";
+
+function checkBlinkDisclaimer(){
+  const sessions=JSON.parse(localStorage.getItem("sessions")||"[]");
+  if(sessions.length<DISCLAIMER_REQUIRED_DAYS)return;
+
+  const daily={};
+  sessions.forEach(s=>{
+    const day=s.id.slice(0,10);
+    daily[day]??=[];
+    if(s.bpmSamples.length)daily[day].push(avg(s.bpmSamples));
+  });
+
+  const days=Object.keys(daily);
+  if(days.length<DISCLAIMER_REQUIRED_DAYS)return;
+
+  const baseline=avg(daily[days[0]]);
+  if(!baseline)return;
+
+  let reduced=0;
+  days.slice(1).forEach(d=>{
+    const v=avg(daily[d]);
+    if(v&&v<=baseline*DISCLAIMER_THRESHOLD)reduced++;
+  });
+
+  if(reduced>=DISCLAIMER_REQUIRED_DAYS&&!localStorage.getItem("blinkDisclaimerAck")){
+    overlay.style.display="flex";
+    localStorage.setItem("blinkDisclaimerAck","1");
+  }
 }
 
 squintBtn.onmousedown=()=>{
@@ -298,6 +379,7 @@ fm.onResults(r=>{
     session.bpmSamples.push(minuteCount);
     bpmText.textContent=minuteCount;
     saveSession();
+    checkBlinkDisclaimer();
     minuteCount=0;
     minuteStart=now;
   }
@@ -314,56 +396,33 @@ tabLive.onclick=()=>{tabLive.classList.add("active");tabGraphs.classList.remove(
 tabGraphs.onclick=()=>{tabGraphs.classList.add("active");tabLive.classList.remove("active");graphs.classList.add("active");live.classList.remove("active");drawGraphs();};
 
 function drawGraphs(){
-  const c = document.getElementById("graphCanvas");
-  const g = c.getContext("2d");
+  const c=document.getElementById("graphCanvas");
+  const g=c.getContext("2d");
   g.clearRect(0,0,c.width,c.height);
 
-  const sessions = JSON.parse(localStorage.getItem("sessions") || "[]");
+  const sessions=JSON.parse(localStorage.getItem("sessions")||"[]");
+  const m={l:50,r:20,t:20,b:50};
+  const w=c.width-m.l-m.r;
+  const h=c.height-m.t-m.b;
 
-  const margin = {left:50, right:20, top:20, bottom:50};
-  const width = c.width - margin.left - margin.right;
-  const height = c.height - margin.top - margin.bottom;
-
-  g.strokeStyle = "#666";
+  g.strokeStyle="#666";
   g.beginPath();
-  g.moveTo(margin.left, margin.top);
-  g.lineTo(margin.left, margin.top + height);
-  g.lineTo(margin.left + width, margin.top + height);
+  g.moveTo(m.l,m.t);
+  g.lineTo(m.l,m.t+h);
+  g.lineTo(m.l+w,m.t+h);
   g.stroke();
 
-  g.fillStyle = "#9aa3c7";
-  g.font = "14px system-ui";
-
-  g.save();
-  g.translate(15, margin.top + height / 2);
-  g.rotate(-Math.PI / 2);
-  g.textAlign = "center";
-  g.fillText("Blink Rate (Blinks per Minute)", 0, 0);
-  g.restore();
-
-  g.textAlign = "center";
-  g.fillText(
-    "Time (Minutes)",
-    margin.left + width / 2,
-    c.height - 15
-  );
-
-  let xOffset = 0;
-  const xStep = 20;
-  const yScale = 5;
-
-  sessions.forEach(session=>{
-    g.strokeStyle = "#6b7cff";
+  let x=0;
+  sessions.forEach(s=>{
+    g.strokeStyle="#6b7cff";
     g.beginPath();
-
-    session.bpmSamples.forEach((bpm,i)=>{
-      const x = margin.left + xOffset + i * xStep;
-      const y = margin.top + height - bpm * yScale;
-      i ? g.lineTo(x,y) : g.moveTo(x,y);
+    s.bpmSamples.forEach((b,i)=>{
+      const px=m.l+x+i*20;
+      const py=m.t+h-b*5;
+      i?g.lineTo(px,py):g.moveTo(px,py);
     });
-
     g.stroke();
-    xOffset += session.bpmSamples.length * xStep + 20;
+    x+=s.bpmSamples.length*20+20;
   });
 }
 </script>
