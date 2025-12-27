@@ -155,6 +155,11 @@ let eyeClosed=false, blinkStart=null;
 let lastEAR=null, lastTime=null;
 let minuteCount=0, minuteStart=Date.now();
 let lastBlinkEnd=0;
+let frameInFlight = false;
+let lastResultTime = Date.now();
+let watchdogTimer = null;
+let camera = null;
+let fm = null;
 
 let squintCalibrating=false, squintStart=null;
 let squintEARs=[], squintFloor=null;
@@ -318,59 +323,136 @@ document.onmouseup=()=>{
 };
 
 /* --- MEDIAPIPE PIPELINE (blink algorithm untouched) --- */
-const fm=new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`});
+function createFaceMesh(){
+  const mesh = new FaceMesh({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
+  });
+  mesh.setOptions({maxNumFaces:1,refineLandmarks:true});
+  mesh.onResults(onResults);
+  return mesh;
+}
+
+fm = createFaceMesh();
 fm.setOptions({maxNumFaces:1,refineLandmarks:true});
 
-fm.onResults(r=>{
-  if(!r.multiFaceLandmarks)return;
-  const lm=r.multiFaceLandmarks[0];
+function onResults(r){
+  lastResultTime = Date.now();
 
-  const ear=smooth(earBuf,(normEAR(lm,LEFT)+normEAR(lm,RIGHT))/2,EAR_WINDOW);
-  earText.textContent=ear.toFixed(3);
-  if(squintCalibrating)squintEARs.push(ear);
+  if(!r.multiFaceLandmarks) return;
+  const lm = r.multiFaceLandmarks[0];
+
+  const ear = smooth(
+    earBuf,
+    (normEAR(lm,LEFT) + normEAR(lm,RIGHT)) / 2,
+    EAR_WINDOW
+  );
+  earText.textContent = ear.toFixed(3);
+  if(squintCalibrating) squintEARs.push(ear);
 
   if(!calibrated){
     cal.push(ear);
-    statusText.textContent="Calibrating neutral baseline…";
-    if(cal.length*33>=CAL_TIME){
-      calibrated=true;
-      statusText.textContent="Tracking";
+    statusText.textContent = "Calibrating neutral baseline…";
+    if(Date.now() - minuteStart >= CAL_TIME){
+      calibrated = true;
+      statusText.textContent = "Tracking";
     }
     return;
   }
 
-  const now=Date.now();
-  let vel=lastEAR!==null?(lastEAR-ear)/(now-lastTime):0;
-  lastEAR=ear; lastTime=now;
+  const now = Date.now();
+  let vel = 0;
+  if(lastEAR !== null && lastTime !== null && now !== lastTime){
+    vel = (lastEAR - ear) / (now - lastTime);
+  }
+  if(!Number.isFinite(vel)) vel = 0;
 
-  velBuf.push(vel); if(velBuf.length>30)velBuf.shift();
-  let threshold=BASE_VEL_Z;
-  if(squintFloor&&ear>squintFloor*0.9)threshold+=0.8;
+  lastEAR = ear;
+  lastTime = now;
+
+  velBuf.push(vel);
+  if(velBuf.length > 30) velBuf.shift();
+
+  let threshold = BASE_VEL_Z;
+  if(squintFloor && ear > squintFloor * 0.9) threshold += 0.8;
 
   if(!eyeClosed){
-    if(zscore(vel,velBuf)>threshold){
-      eyeClosed=true; blinkStart=now; eyeState.textContent="Closed";
-    } else eyeState.textContent="Open";
-  } else if(zscore(vel,velBuf)<-1){
-    const dur=now-blinkStart;
-    if(dur>=MIN_BLINK&&dur<=MAX_BLINK&&blinkStart-lastBlinkEnd>=MIN_OPEN_INTERVAL){
+    if(zscore(vel, velBuf) > threshold){
+      eyeClosed = true;
+      blinkStart = now;
+      eyeState.textContent = "Closed";
+    } else {
+      eyeState.textContent = "Open";
+    }
+  } else if(zscore(vel, velBuf) < -1){
+    const dur = now - blinkStart;
+    if(
+      dur >= MIN_BLINK &&
+      dur <= MAX_BLINK &&
+      blinkStart - lastBlinkEnd >= MIN_OPEN_INTERVAL
+    ){
       minuteCount++;
     }
-    lastBlinkEnd=now;
-    eyeClosed=false;
-    eyeState.textContent="Open";
+    lastBlinkEnd = now;
+    eyeClosed = false;
+    eyeState.textContent = "Open";
   }
 
-  if(now-minuteStart>=60000){
+  if(now - minuteStart >= 60000){
     session.bpmSamples.push(minuteCount);
-    bpmText.textContent=minuteCount;
-    finalizeSession();       // <-- NEW
-    minuteCount=0;
-    minuteStart=now;
+    bpmText.textContent = minuteCount;
+    finalizeSession();
+    minuteCount = 0;
+    minuteStart = now;
+  }
+}
+
+function restartPipeline(){
+  try{
+    camera?.stop();
+    fm?.close();
+  }catch(e){}
+
+  frameInFlight = false;
+  lastEAR = null;
+  lastTime = null;
+  velBuf.length = 0;
+
+  fm = createFaceMesh();
+
+  camera = new Camera(video,{
+    width:640,
+    height:480,
+    onFrame: async () => {
+      if(frameInFlight) return;
+      frameInFlight = true;
+      try{
+        await fm.send({image: video});
+      }catch(e){}
+      frameInFlight = false;
+    }
+  });
+  camera.start();
+}
+
+watchdogTimer = setInterval(()=>{
+  if(Date.now() - lastResultTime > 1200){
+    restartPipeline();
+  }
+}, 500);
+
+camera = new Camera(video,{
+  width:640,
+  height:480,
+  onFrame: async () => {
+    if(frameInFlight) return;
+    frameInFlight = true;
+    try{
+      await fm.send({image: video});
+    }catch(e){}
+    frameInFlight = false;
   }
 });
-
-new Camera(video,{onFrame:async()=>fm.send({image:video}),width:640,height:480}).start();
+camera.start();
 
 /* --- TAB + HISTORY VIEW --- */
 const tabLive=document.getElementById("tabLive");
