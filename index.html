@@ -29,8 +29,24 @@ button{background:var(--panel-soft);border:1px solid #2a2f55;color:var(--text);p
 button.active{background:var(--accent)}
 button.hold{background:var(--accent-2)}
 main{padding:20px;display:grid;place-items:center}
-section{display:none;max-width:900px;width:100%}
-section.active{display:block}
+section{
+  position:absolute;
+  inset:0;
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .2s ease;
+}
+
+section.active{
+  opacity:1;
+  pointer-events:auto;
+  position:relative;
+}
+video{
+  will-change: transform;
+  transform: translateZ(0);
+}
+
 .card{background:var(--panel);border:1px solid #242a52;border-radius:16px;padding:16px;box-shadow:0 20px 50px rgba(0,0,0,.35)}
 .video-wrap{display:grid;grid-template-columns:640px 1fr;gap:16px}
 video{border-radius:16px;background:#000}
@@ -379,32 +395,36 @@ function onResults(r){
   let threshold = BASE_VEL_Z;
   if(squintFloor && ear > squintFloor * 0.9) threshold += 0.8;
 
-  if(!eyeClosed){
-    if(zscore(vel, velBuf) > threshold){
-      eyeClosed = true;
-      blinkStart = now;
-      eyeState.textContent = "Closed";
-    } else {
-      eyeState.textContent = "Open";
-    }
-  } else if(zscore(vel, velBuf) < -1){
-    const dur = now - blinkStart;
-    if(
-      dur >= MIN_BLINK &&
-      dur <= MAX_BLINK &&
-      blinkStart - lastBlinkEnd >= MIN_OPEN_INTERVAL
-    ){
-      minuteCount++;
-    }
-    lastBlinkEnd = now;
-    eyeClosed = false;
+if (!eyeClosed) {
+  if (
+    zscore(vel, velBuf) > threshold &&
+    zscore(velBuf[velBuf.length - 2] || 0, velBuf) > threshold * 0.85
+  ) {
+    eyeClosed = true;
+    blinkStart = now;
+    eyeState.textContent = "Closed";
+  } else {
     eyeState.textContent = "Open";
   }
+} 
+else if (zscore(vel, velBuf) < -1) {
+  const dur = now - blinkStart;
+  if (
+    dur >= MIN_BLINK &&
+    dur <= MAX_BLINK &&
+    blinkStart - lastBlinkEnd >= MIN_OPEN_INTERVAL
+  ) {
+    minuteCount++;
+  }
+  lastBlinkEnd = now;
+  eyeClosed = false;
+  eyeState.textContent = "Open";
+}
+
 
   if(now - minuteStart >= 60000){
     session.bpmSamples.push(minuteCount);
     bpmText.textContent = minuteCount;
-    finalizeSession();
     minuteCount = 0;
     minuteStart = now;
   }
@@ -437,9 +457,11 @@ function restartPipeline(){
   });
   camera.start();
 }
+let liveVisible = true;
 
-watchdogTimer = setInterval(()=>{
-  if(Date.now() - lastResultTime > 3000){
+watchdogTimer = setInterval(() => {
+  if (!liveVisible) return;
+  if (Date.now() - lastResultTime > 3000) {
     restartPipeline();
   }
 }, 500);
@@ -464,8 +486,23 @@ const tabGraphs=document.getElementById("tabGraphs");
 const live=document.getElementById("live");
 const graphs=document.getElementById("graphs");
 
-tabLive.onclick=()=>{tabLive.classList.add("active");tabGraphs.classList.remove("active");live.classList.add("active");graphs.classList.remove("active");};
-tabGraphs.onclick=()=>{tabGraphs.classList.add("active");tabLive.classList.remove("active");graphs.classList.add("active");live.classList.remove("active");drawGraphs();};
+tabLive.onclick = () => {
+  liveVisible = true;
+  tabLive.classList.add("active");
+  tabGraphs.classList.remove("active");
+  live.classList.add("active");
+  graphs.classList.remove("active");
+};
+
+tabGraphs.onclick = () => {
+  liveVisible = false;
+  tabGraphs.classList.add("active");
+  tabLive.classList.remove("active");
+  graphs.classList.add("active");
+  live.classList.remove("active");
+  drawGraphs();
+};
+
 
 /* --- HISTORY GRAPH + TABLE --- */
 function drawGraphs(){
